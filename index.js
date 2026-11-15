@@ -21,7 +21,7 @@ export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.3.0'
+const VERSION = '0.3.1'
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)
@@ -200,6 +200,7 @@ export function apply(ctx, _config) {
   let ticking = false
   const tick = async () => {
     if (!creds.token || state.paused) return
+    if (!cfg.postingEnabled) return
     if (Date.now() - Number(state.lastIngestAt || 0) > 5 * 60 * 1000) {
       const n = ingestIfNeeded(state, dir, cfg)
       state.lastIngestAt = Date.now()
