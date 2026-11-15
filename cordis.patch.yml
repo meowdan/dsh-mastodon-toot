@@ -1,0 +1,12 @@
+# dsh-mastodon-toot —— 插件自带的挂载声明
+# 装上之后，profile 只要在 dsh.profile.bundles 里列出本包名即生效。
+#
+#   dsh plugin --profile desktop add dsh-mastodon-toot
+#   本地开发：dsh plugin --profile desktop add link:<插件目录>
+#
+# 用户配置在插件家目录（$DSH_HOME/mastodon-toot/config.json），设置页里改。
+
+- insert:
+    - id: mastodon-toot
+      name: dsh-mastodon-toot
+      config: {}
