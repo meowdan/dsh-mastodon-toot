@@ -532,7 +532,9 @@ window.__ModuleLoader__.load({
             onClick: () => setTab(k),
           }, label))),
 
-        h(panes[tab] || panes.conn, { cfg, set }),
+        tab === 'book'
+          ? h(BookPane, { cfg, set })
+          : h(React.Fragment, null, (panes[tab] || panes.conn)()),
 
         h(SaveBar, { onSave: save, busy, msg }),
 
