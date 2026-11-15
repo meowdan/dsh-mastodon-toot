@@ -7,3 +7,6 @@ Thumbs.db
 node_modules.orig/
 PLAN.md
 dist/
+scripts/release.mjs
+scripts/market-prepare.mjs
+scripts/market-submit.mjs
