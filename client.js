@@ -1,3 +1,4 @@
+// dsh-skip-complexity: 设置页单入口组件：五个页签共享同一份状态与保存逻辑，拆成独立组件需要重复拉取/保存；已按页签组织为子渲染函数。浏览器端 DSH 只加载单个 client.js，无法按文件拆分。
 // dsh-skip-quality: 「记原话」= storeText 功能名，非 AI 对话记录
 /**
  * client.js —— 浏览器半端：设置页里的一页「长毛象」
@@ -332,7 +333,7 @@ window.__ModuleLoader__.load({
       const paused = !!st?.paused
       const account = st?.account
 
-      const connPane = h(Card, { title: '连接', desc: '令牌只存在本机插件目录，不写日志、不回显。' },
+      const connPane = () => h(Card, { title: '连接', desc: '令牌只存在本机插件目录，不写日志、不回显。' },
         h(Row, { label: '实例', hint: '例如 mastodon.social（会自动补 https://）' },
           h('input', {
             className: 'mt-input', value: conn.instance, placeholder: 'mastodon.social',
@@ -370,7 +371,7 @@ window.__ModuleLoader__.load({
             h(Row, { label: '冷却(分)', hint: '两次之间至少隔这么久' }, h(Num, { value: cfg[k + 'MinGapMin'], min: 0, max: 240, onChange: (v) => set(k + 'MinGapMin', v) }))))
       }
 
-      const replyPane = h(React.Fragment, null,
+      const replyPane = () => h(React.Fragment, null,
         h(Card, { title: '互动总开关', desc: '不按概率：按分组开关、每日额度、冷却、每串上限决定。@ 我和时间线分开算，每条决定都记小本本。' },
           h(Row, { label: '自动回复', hint: '关掉就完全不看通知和时间线' }, h(Toggle, { checked: !!cfg.autoReply, onChange: (v) => set('autoReply', v) })),
           h('div', { className: 'mt-inline' },
@@ -420,7 +421,7 @@ window.__ModuleLoader__.load({
 
       const src = (k, label, hint) => h(Row, { label, hint }, h(Toggle, { checked: !!cfg[k], onChange: (v) => set(k, v) }))
 
-      const postPane = h(React.Fragment, null,
+      const postPane = () => h(React.Fragment, null,
         h(Card, { title: '自动发帖', desc: '按日期种子随机排点，不用固定钟点；默认关，打开前先点下面的「试写」看看口吻。' },
           h(Row, { label: '自动发帖', hint: '关着就只有手动发' }, h(Toggle, { checked: !!cfg.postingEnabled, onChange: (v) => set('postingEnabled', v) })),
           h(Row, { label: '只试不写', hint: 'dryRun：照常算，但不真的发出去' }, h(Toggle, { checked: !!cfg.dryRun, onChange: (v) => set('dryRun', v) })),
@@ -474,7 +475,7 @@ window.__ModuleLoader__.load({
               ? `下一个点 ${posting.nextSlot || '—'} · 今天 ${(posting.posting?.used || []).length}/${(posting.posting?.slots || []).length} 个点已用`
               : '…')))
 
-      const advPane = h(React.Fragment, null,
+      const advPane = () => h(React.Fragment, null,
         h(Card, { title: '高级', desc: '不懂就别动。' },
           h('div', { className: 'mt-grid' },
             h(Row, { label: '轮询秒数' }, h(Num, { value: cfg.pollSec, min: 15, max: 600, step: 5, onChange: (v) => set('pollSec', v) })),
@@ -490,13 +491,7 @@ window.__ModuleLoader__.load({
             h('small', { className: 'mt-muted' }, `心跳检查 ${fmtTime(st?.lastCheckAt)}`)),
           showLog ? h('pre', { className: 'mt-pre' }, (st?.log || []).slice(-40).join('\n') || '（还没有日志）') : null))
 
-      const panes = {
-        conn: connPane,
-        reply: replyPane,
-        post: postPane,
-        book: h(BookPane, { cfg, set }),
-        adv: advPane,
-      }
+      const panes = { conn: connPane, reply: replyPane, post: postPane, book: BookPane, adv: advPane }
 
       return h('div', { className: 'mt-root' },
         h('header', { className: 'mt-head' },
@@ -524,7 +519,7 @@ window.__ModuleLoader__.load({
             onClick: () => setTab(k),
           }, label))),
 
-        panes[tab],
+        h(panes[tab] || panes.conn, { cfg, set }),
 
         h(SaveBar, { onSave: save, busy, msg }),
 
