@@ -178,6 +178,7 @@ window.__ModuleLoader__.load({
       const [showLog, setShowLog] = useState(false)
       const [posting, setPosting] = useState(null)
       const [postMsg, setPostMsg] = useState('')
+      const [inter, setInter] = useState(null)
 
       const flash = (kind, text) => {
         setMsg({ kind, text })
@@ -208,6 +209,39 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (tab === 'post') refreshPosting()
       }, [tab, refreshPosting])
+
+      const refreshInter = useCallback(async () => {
+        try { setInter(await jget('/interact/stats')) } catch { /* 留空 */ }
+      }, [])
+
+      useEffect(() => {
+        if (tab === 'reply') refreshInter()
+      }, [tab, refreshInter])
+
+      const runInteract = async () => {
+        setBusy('interact')
+        try {
+          const r = await jpost('/interact/run', { maxActions: 1 })
+          if (r.skipped) flash('warn', r.reason || '上一轮还在跑')
+          else if (r.replied) flash('ok', `回了 ${r.replied} 条`)
+          else if (r.errors) flash('bad', '这轮有错误，看日志')
+          else flash('ok', '这轮没有要回的（额度/冷却/分组开关）')
+          await refreshInter()
+        } catch (e) {
+          flash('bad', '跑一轮失败：' + e.message)
+        } finally { setBusy('') }
+      }
+
+      const refreshPeople = async () => {
+        setBusy('relations')
+        try {
+          const r = await jpost('/relations/refresh')
+          flash('ok', `关系刷新：互关 ${(r.mutual || []).length} 人`)
+          await refreshInter()
+        } catch (e) {
+          flash('bad', '刷新关系失败：' + e.message)
+        } finally { setBusy('') }
+      }
 
       const set = (k, v) => setCfg((c) => ({ ...c, [k]: v }))
 
@@ -321,37 +355,68 @@ window.__ModuleLoader__.load({
           h('small', { className: 'mt-muted' },
             st?.lastOkAt ? `上次可用 ${fmtTime(st.lastOkAt)}` : '还没成功连过')))
 
-      const replyPane = h(Card, { title: '自动回复', desc: '公共版默认只回 @ 你的嘟文；时间线插话默认关，开了也只按概率来。' },
-        h(Row, { label: '自动回复', hint: '关掉就完全不看通知' }, h(Toggle, { checked: !!cfg.autoReply, onChange: (v) => set('autoReply', v) })),
-        h(Row, { label: '范围', hint: '只回 @ 最稳；加上主人时间线会主动插话' },
-          h('select', {
-            className: 'mt-input', value: cfg.scope,
-            onChange: (e) => set('scope', e.target.value),
-          },
-            h('option', { value: 'mentions' }, '只回 @ 我'),
-            h('option', { value: 'mentions+owner' }, '回 @ + 我的时间线'),
-            h('option', { value: 'all' }, '回 @ + 所有人的时间线（不推荐）'))),
-        h('div', { className: 'mt-grid' },
-          h(Row, { label: '每天·自己人' }, h(Num, { value: cfg.maxPerDayOwner, min: 0, max: 200, onChange: (v) => set('maxPerDayOwner', v) })),
-          h(Row, { label: '每天·其他人' }, h(Num, { value: cfg.maxPerDayOthers, min: 0, max: 200, onChange: (v) => set('maxPerDayOthers', v) })),
-          h(Row, { label: '每串·真人' }, h(Num, { value: cfg.perThreadHuman, min: 1, max: 10, onChange: (v) => set('perThreadHuman', v) })),
-          h(Row, { label: '每串·bot' }, h(Num, { value: cfg.perThreadBot, min: 0, max: 10, onChange: (v) => set('perThreadBot', v) })),
-          h(Row, { label: '时间线概率' }, h(Num, { value: cfg.timelineProb, min: 0, max: 1, step: 0.05, onChange: (v) => set('timelineProb', v) })),
-          h(Row, { label: '只看多少小时内' }, h(Num, { value: cfg.sinceHours, min: 1, max: 168, onChange: (v) => set('sinceHours', v) })),
-          h(Row, { label: '单条字数上限' }, h(Num, { value: cfg.replyMaxChars, min: 20, max: 1000, step: 10, onChange: (v) => set('replyMaxChars', v) }))),
-        h(Row, { label: '夜里安静', hint: '23:00–08:00 不主动回（被 @ 仍会回）' }, h(Toggle, { checked: !!cfg.nightPause, onChange: (v) => set('nightPause', v) })),
-        h(Row, { label: '总是回的人', hint: '账号名，逗号分隔；留空 = 只按范围' },
-          h('textarea', {
-            className: 'mt-input mt-textarea', rows: 2,
-            value: (cfg.allowlist || []).join(', '),
-            onChange: (e) => set('allowlist', e.target.value),
-          })),
-        h(Row, { label: '从不回的人', hint: '账号名，逗号分隔' },
-          h('textarea', {
-            className: 'mt-input mt-textarea', rows: 2,
-            value: (cfg.blocklist || []).join(', '),
-            onChange: (e) => set('blocklist', e.target.value),
-          })))
+      const replyGroup = (cat, title, hint) => {
+        const k = 'reply' + cat
+        const used = (inter?.groups || []).find((g) => g.cat === cat.toLowerCase())?.used ?? 0
+        return h(Card, { title, desc: hint },
+          h('div', { className: 'mt-grid' },
+            h(Row, { label: '启用' }, h(Toggle, { checked: !!cfg[k + 'Enabled'], onChange: (v) => set(k + 'Enabled', v) })),
+            h(Row, { label: '回 @ 我' }, h(Toggle, { checked: !!cfg[k + 'Mentions'], onChange: (v) => set(k + 'Mentions', v) })),
+            h(Row, { label: '回时间线' }, h(Toggle, { checked: !!cfg[k + 'Timeline'], onChange: (v) => set(k + 'Timeline', v) })),
+            h(Row, { label: '今天已回' }, h('span', { className: 'mt-muted' }, used + ' 条'))),
+          h('div', { className: 'mt-grid' },
+            h(Row, { label: '每天上限', hint: '0 = 不限' }, h(Num, { value: cfg[k + 'MaxPerDay'], min: 0, max: 500, onChange: (v) => set(k + 'MaxPerDay', v) })),
+            h(Row, { label: '每串上限' }, h(Num, { value: cfg[k + 'PerThread'], min: 0, max: 10, onChange: (v) => set(k + 'PerThread', v) })),
+            h(Row, { label: '冷却(分)', hint: '两次之间至少隔这么久' }, h(Num, { value: cfg[k + 'MinGapMin'], min: 0, max: 240, onChange: (v) => set(k + 'MinGapMin', v) }))))
+      }
+
+      const replyPane = h(React.Fragment, null,
+        h(Card, { title: '互动总开关', desc: '不按概率：按分组开关、每日额度、冷却、每串上限决定。@ 我和时间线分开算，每条决定都记小本本。' },
+          h(Row, { label: '自动回复', hint: '关掉就完全不看通知和时间线' }, h(Toggle, { checked: !!cfg.autoReply, onChange: (v) => set('autoReply', v) })),
+          h('div', { className: 'mt-inline' },
+            h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'interact', onClick: runInteract },
+              busy === 'interact' ? '跑着…' : '立刻跑一轮'),
+            h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'relations', onClick: refreshPeople },
+              busy === 'relations' ? '刷新中…' : '刷新好友关系'),
+            h('small', { className: 'mt-muted' },
+              inter?.relations?.ownerAcct
+                ? `主人 @${inter.relations.ownerAcct} · 互关 ${(inter.relations.mutual || []).length} 人 · ${fmtTime(inter.relations.at)}`
+                : '还没识别到主人（去「连接」里测试一次）')),
+          h('div', { className: 'mt-inline mt-muted' },
+            h('span', null, `今天已回：主人 ${inter?.reply?.counts?.owner || 0} · 好友 ${inter?.reply?.counts?.friend || 0} · 其他人 ${inter?.reply?.counts?.other || 0}`),
+            inter?.reply?.lastSkip ? h('span', null, ' · 上次没回：' + inter.reply.lastSkip) : null,
+            inter?.reply?.lastError ? h('span', null, ' · 上次报错：' + inter.reply.lastError) : null),
+          (inter?.stats?.lastActions || []).length
+            ? h('pre', { className: 'mt-pre' }, inter.stats.lastActions.map((a) => `@${a.acct}（${a.cat}）${a.dryRun ? ' [只试]' : ''}：${a.text}`).join('\n'))
+            : null),
+        replyGroup('Owner', '主人', '@ 我必回，默认额度不限；你可以把时间线也打开。'),
+        replyGroup('Friend', '好友', '互关的人：我关注 ∩ 关注我。默认回 @ 和时间线，额度 12。'),
+        replyGroup('Other', '其他人', '陌生人：默认只回 @，时间线关，额度 8。'),
+        h(Card, { title: '通用', desc: '这三组共用。' },
+          h('div', { className: 'mt-grid' },
+            h(Row, { label: '回复可见性', hint: 'public 会进时间线' },
+              h('select', {
+                className: 'mt-input', value: cfg.replyVisibility || 'unlisted',
+                onChange: (e) => set('replyVisibility', e.target.value),
+              },
+                h('option', { value: 'unlisted' }, 'unlisted（公开但不上时间线）'),
+                h('option', { value: 'public' }, 'public'),
+                h('option', { value: 'private' }, 'private'))),
+            h(Row, { label: '只看多少小时内' }, h(Num, { value: cfg.sinceHours, min: 1, max: 168, onChange: (v) => set('sinceHours', v) })),
+            h(Row, { label: '单条字数上限' }, h(Num, { value: cfg.replyMaxChars, min: 20, max: 1000, step: 10, onChange: (v) => set('replyMaxChars', v) }))),
+          h(Row, { label: '主人账号', hint: '留空时：只有一个互关就当主人（bot 场景），否则认本账号；多个用逗号分隔' },
+            h('input', {
+              className: 'mt-input', value: cfg.ownerAcct || '', placeholder: '例如 meowdan',
+              onChange: (e) => set('ownerAcct', e.target.value),
+            })),
+          h(Row, { label: '夜里安静', hint: '23:00–08:00 只回主人，其他人不主动回' }, h(Toggle, { checked: !!cfg.nightPause, onChange: (v) => set('nightPause', v) })),
+          h(Row, { label: '只试不写', hint: 'dryRun：照常生成、记账，但不真的发' }, h(Toggle, { checked: !!cfg.dryRun, onChange: (v) => set('dryRun', v) })),
+          h(Row, { label: '从不回的人', hint: '账号名，逗号分隔' },
+            h('textarea', {
+              className: 'mt-input mt-textarea', rows: 2,
+              value: (cfg.blocklist || []).join(', '),
+              onChange: (e) => set('blocklist', e.target.value),
+            }))))
 
       const src = (k, label, hint) => h(Row, { label, hint }, h(Toggle, { checked: !!cfg[k], onChange: (v) => set(k, v) }))
 

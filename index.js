@@ -14,6 +14,8 @@ import {
   digest, prune, recentInteractions,
 } from './lib/notebook.mjs'
 import { composePost, buildPostPrompt } from './lib/compose.mjs'
+import { replyTick } from './lib/interact.mjs'
+import { refreshRelations, categoryConfig } from './lib/relations.mjs'
 import {
   publish, dueSlot, dueQueueItem, markQueuePosted, recordPosted,
   ingestIfNeeded, slotsFor,
@@ -24,7 +26,7 @@ export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.1.0'
+const VERSION = '0.3.0'
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)
@@ -139,8 +141,8 @@ export function apply(ctx, _config) {
   let creds = importLegacyCreds(dir)
   let state = loadState(dir)
 
-  if (creds.token) logLine(dir, `启动：实例 ${creds.instance}，自动回复 ${cfg.autoReply ? '开' : '关'}`)
-  else logLine(dir, '启动：还没有凭证，等设置页填')
+  if (creds.token) logLine(dir, `启动（v${VERSION}）：实例 ${creds.instance}，自动回复 ${cfg.autoReply ? '开' : '关'}`)
+  else logLine(dir, `启动（v${VERSION}）：还没有凭证，等设置页填`)
   if (cfg.notebook !== 'off') {
     try {
       const dropped = prune(dir, cfg.retentionDays)
@@ -244,6 +246,44 @@ export function apply(ctx, _config) {
     return () => clearInterval(timer)
   }, 'mastodon-toot scheduler')
 
+  // 互动：每 pollSec 秒看一次通知与时间线；同一时刻只跑一轮
+  let replying = false
+  const runReplyRound = async (opts = {}) => {
+    if (replying) return { skipped: true, reason: '上一轮还没跑完' }
+    replying = true
+    try {
+      const out = await replyTick(ctx, creds, cfg, dir, state, { force: true, ...opts })
+      if (!out.errors) state.lastReplyError = ''
+      state.lastReplyAt = Date.now()
+      state.replyStats = {
+        lastAt: state.lastReplyAt,
+        replied: Number(state.replyStats?.replied || 0) + out.replied,
+        skipped: Number(state.replyStats?.skipped || 0) + out.skipped,
+        errors: Number(state.replyStats?.errors || 0) + out.errors,
+        lastActions: out.actions,
+      }
+      if (out.replied) logLine(dir, `回复了 ${out.replied} 条：${out.actions.map((a) => '@' + a.acct).join(', ')}`)
+      saveState(dir, state)
+      return out
+    } finally {
+      replying = false
+    }
+  }
+
+  ctx.effect(() => {
+    const every = Math.max(15, Number(cfg.pollSec) || 30) * 1000
+    const timer = setInterval(() => {
+      if (!cfg.autoReply || !creds.token || state.paused) return
+      runReplyRound({ maxActions: 1 }).catch((e) => {
+        state.lastReplyError = errText(e)
+        logLine(dir, `互动失败：${state.lastReplyError}`)
+        saveState(dir, state)
+      })
+    }, every)
+    timer.unref?.()
+    return () => clearInterval(timer)
+  }, 'mastodon-toot reply loop')
+
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: ROUTE,
@@ -272,6 +312,18 @@ export function apply(ctx, _config) {
             lastOkAt: state.lastOkAt || 0,
             lastError: state.lastError || '',
             notebook: notebookStats(dir),
+            reply: {
+              autoReply: !!cfg.autoReply,
+              stats: state.replyStats || null,
+              counts: state.reply?.counts || { owner: 0, friend: 0, other: 0 },
+              lastSkip: state.reply?.lastSkip || '',
+              lastError: state.lastReplyError || '',
+            },
+            relations: {
+              ownerAcct: state.relations?.ownerAcct || '',
+              mutual: (state.relations?.mutual || []).length,
+              at: state.relations?.at || 0,
+            },
             config: cfg,
             log: tailLog(dir, 30),
           })
@@ -314,6 +366,40 @@ export function apply(ctx, _config) {
           saveState(dir, state)
           logLine(dir, state.paused ? '已暂停' : '已恢复')
           return sendJson(res, 200, { ok: true, paused: state.paused })
+        }
+
+        // ---- 互动（分组：主人/好友/其他人）----
+        if (req.method === 'GET' && path === '/interact/stats') {
+          return sendJson(res, 200, {
+            ok: true,
+            autoReply: !!cfg.autoReply,
+            dryRun: !!cfg.dryRun,
+            stats: state.replyStats || null,
+            reply: state.reply || null,
+            relations: {
+              ownerAcct: state.relations?.ownerAcct || '',
+              ownerId: state.relations?.ownerId || '',
+              mutual: state.relations?.mutual || [],
+              following: (state.relations?.following || []).length,
+              at: state.relations?.at || 0,
+            },
+            groups: ['owner', 'friend', 'other'].map((cat) => ({
+              cat,
+              ...categoryConfig(cfg, cat),
+              used: Number(state.reply?.counts?.[cat] || 0),
+            })),
+          })
+        }
+        if (req.method === 'POST' && path === '/interact/run') {
+          const body = JSON.parse(await readBody(req) || '{}')
+          const out = await runReplyRound({ maxActions: Math.max(1, Math.min(5, Number(body.maxActions) || 1)) })
+          return sendJson(res, 200, { ok: true, ...out, reply: state.reply || null })
+        }
+        if (req.method === 'POST' && path === '/relations/refresh') {
+          const rel = await refreshRelations(creds, state, { force: true })
+          saveState(dir, state)
+          logLine(dir, `关系刷新：互关 ${rel.mutual.length} 人`)
+          return sendJson(res, 200, { ok: true, ownerAcct: rel.ownerAcct, mutual: rel.mutual })
         }
 
         // ---- 小本本 ----

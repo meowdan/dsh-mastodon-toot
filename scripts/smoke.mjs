@@ -96,6 +96,19 @@ check('隐私闸-正常', chat.looksPrivate('今天出门吃了碗拉面，汤�
 check('清洗-列表去掉', !chat.cleanAssistant('- 改了 x.js\n- 修了接口\n**好了**').includes('x.js'))
 check('清洗-保留句子', chat.cleanAssistant('拆好了，设置页现在是五个页签，用起来没那么乱。').includes('五个页签'))
 
+// 分组互动：纯函数 + 只读路由（不真的跑互动，避免拿真账号回人）
+const rel = await import('../lib/relations.mjs')
+const fakeRel = { ownerAcct: 'meowdan', mutual: ['friend_one'] }
+check('分组-主人', rel.categoryOf('@MeowDan', fakeRel, { ownerAcct: 'meowdan' }) === 'owner')
+check('分组-好友', rel.categoryOf('friend_one', fakeRel, {}) === 'friend')
+check('分组-其他人', rel.categoryOf('stranger', fakeRel, {}) === 'other')
+const is = await call('/api/mastodon-toot/interact/stats')
+check('互动状态', is.status === 200 && (is.body.groups || []).length === 3 && typeof is.body.groups[0].maxPerDay === 'number')
+check('互动状态-分组名', (is.body.groups || []).map((g) => g.cat).join(',') === 'owner,friend,other')
+
 server.closeAllConnections?.()
 await new Promise((r) => server.close(r))
+// 兜底：宿主插件里的 interval 可能还挂着，两秒后强制收尾
+const hardStop = setTimeout(() => process.exit(failed ? 1 : 0), 2000)
+hardStop.unref?.()
 process.exitCode = failed ? 1 : 0

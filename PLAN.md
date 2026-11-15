@@ -457,3 +457,38 @@ lib/scheduler.mjs     定时器、抖动、窗口、错过后补
 6. 市场：上 awesome-dsh-plugin 目录，npm 包名同名。
 
 已开工：M1 骨架 + 连接 + 设置页。下一步 M2 小本本，M3 互动引擎影子模式。
+
+---
+
+## 13. M3 已落地：分组互动（2026-11-15 晚）
+
+起因：主人要求「回复不应该按概率，互动要分开——和主人的、其他人的、好友的、全部时间线的都要分开」。原来只有一个开关占位，`timelineProb` 是旧管道遗留，删掉它的用法。
+
+### 13.1 模型
+- 三组：`owner`（`ownerAcct`，连接测试后由 `verify_credentials` 自动填）/ `friend`（我关注 ∩ 关注我，互关）/ `other`（其余）。
+- 每组六个旋钮：`Enabled` / `Mentions`（回 @）/ `Timeline`（回时间线）/ `MaxPerDay`（0=不限）/ `PerThread` / `MinGapMin`。
+- 默认：主人 不限·3·2 分钟（回 @ + 时间线）；好友 12·2·10（回 @ + 时间线）；其他人 8·1·15（只回 @）。
+- 全局：`replyVisibility`（默认 unlisted）、`sinceHours`（20）、`replyMaxChars`（160）、`nightPause`（23–08 只回主人）、`blocklist`、`dryRun`。
+- 点「立刻跑一轮」：绕过 `autoReply` 开关但尊重 `paused` 与 `dryRun`。
+
+### 13.2 一轮的样子
+1. `refreshRelations`：`verify_credentials` 拿 owner，`/accounts/:id/following|followers` 翻 3 页取交集，缓存 24h；失败沿用旧缓存。
+2. 通知：`/api/v1/notifications?limit=40&since_id=`，只留 mention；同一账号只取最新一条（同一串只回最后一条）。
+3. 时间线：`/api/v1/timelines/home?limit=20&since_id=`；只插话顶层帖，跳过转嘟、回复帖、direct/private、自己。
+4. 候选逐条过：分组开关 → mentions/timeline → 额度 → 冷却 → `context` 查这串回过没有 / 回够没有 → `generate()` 生成 → 发 `@acct 正文` + `in_reply_to_id`。
+5. 成功记小本本 `kind:'reply'`；dryRun 记 `kind:'skip'` + 草稿 + 原因；被额度/冷却挡下的不记（只更新 `lastSkip`）。
+
+### 13.3 为什么不用概率
+概率只解决「要不要插话」，解决不了「跟谁插、插几次、什么时候不插」。分组 + 额度 + 冷却 + 每串上限是可解释的，出问题能指着设置说「这里挡住了」；概率出问题只能猜。
+
+### 13.4 文件
+- `lib/relations.mjs`：`refreshRelations` / `categoryOf` / `categoryConfig` / `CATEGORY_LABEL`。
+- `lib/interact.mjs`：`replyTick`（含 `composeReply` / `postReply` / `threadInfo` / `canReply`）。
+- `index.js`：互动计时器（每 `pollSec` 秒）、`GET /interact/stats`、`POST /interact/run`、`POST /relations/refresh`；状态页带分组计数。
+- `client.js`：回复页改成 总开关 + 主人/好友/其他人三张卡 + 通用。
+- `scripts/smoke.mjs`：27 项 PASS（新增分组纯函数与互动状态路由）。
+
+### 13.5 下一步
+- 影子模式：本机已先把 `dryRun=true` 打开跑草稿（2026-11-15 晚），确认口吻后把「只试不写」关掉即真回。
+- M5 迁移：旧 Python 方案继续跑，直到插件影子结果一致；旧状态（watch.json 的 replied / last_timeline_reply）可以导一次。
+- M6：GitHub + npm + awesome-dsh-plugin PR + B 站视频。
