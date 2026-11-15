@@ -18,11 +18,17 @@
 ## 还没做（路线图）
 
 - v0.4：表情包、从旧方案迁移、灰度切换。
-- v1.0：发布到 npm / DSH 插件市场；补文档和视频。
+- v1.0：补齐文档和视频（npm 与插件市场已通）。
 
 ## 安装
 
-最省事的是预构建 tarball（GitHub Release，不用编译）：
+从 npm 装（最省事，不用编译）：
+
+```bash
+dsh plugin --profile desktop add dsh-mastodon-toot
+```
+
+也可以直接装 GitHub Release 的预构建 tarball：
 
 ```bash
 dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.6/dsh-mastodon-toot-0.3.6.tgz
