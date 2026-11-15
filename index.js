@@ -21,7 +21,7 @@ export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.3.1'
+const VERSION = '0.3.2'
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)
@@ -217,7 +217,7 @@ export function apply(ctx, _config) {
     }
     const slot = dueSlot(state, cfg)
     if (!slot) { saveState(dir, state); return }
-    const { text, names } = await composePost(ctx, cfg, dir)
+    const { text, names } = await composePost(ctx, cfg, dir, { creds })
     await doPost(text, names.join('+') || 'compose')
     state.posting.used = [...(state.posting.used || []), slot]
     state.posting.lastAt = Date.now()
