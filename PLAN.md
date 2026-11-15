@@ -42,7 +42,18 @@
 - smoke 扩到 16 项全 PASS（新增 posting / queue / 试写不发送）。
 - 修：`dueSlot` 之前只认 tzParts 对象，传时间戳会静默返回 null；现在两种都收，且间隔判断用传入时刻而不是墙上时间。
 
-**下一步**：重启 DSH → 发帖 tab 点「试写一条」看真实口吻（不发送）→ 满意再手动发一条 → M3 回复引擎（先影子/dryRun）→ M5 迁移 → M6 发布 + 视频。
+**M4.5 「和主人的对话」素材（2026-11-15 夜，未上线验证）**：
+
+- 主人要原文：对话比资讯有意思；隐私的部分去掉。
+- `lib/chat.mjs`：直接读 `$DSH_HOME/sessions/**/session.v4.jsonl.zstd`（多帧 zstd，按 magic 切帧逐帧解，坏帧跳过）；只取 `source.kind === 'user'` 的真人消息 + 每轮最后的 assistant 文字；跳过 subagent 会话与 bili-duty 工作区。
+- 隐私闸：命中 IPv4、Windows/Unix 路径、sk-/ghp_ token、邮箱、手机号、密码/密钥/内网/NAS/飞牛/端口等关键词、URL、代码块 → 整段丢弃（不打码）。
+- 「不像聊天」的汇报先用 `cleanAssistant` 洗掉列表/加粗/代码/文件名行，只留普通句子；挑选时优先「像聊天」的轮次，再补汇报洗出来的句子。
+- 去重：`state/chat_seen.json` 按用户消息 sha1 记；试写（draft）不消耗素材（`consumeChat:false`）。
+- 接进 `compose.mjs` 的 `buildPostPrompt`：`srcChat` 开关（默认开）、`chatSinceHours`（默认 24h，UI 可调）、`chatSessionsDir`（默认 `$DSH_HOME/sessions`）。
+- smoke 扩到 22 项全 PASS（新增隐私闸 3 项、清洗 2 项）。
+- 局限：读的是会话日志，不是实时事件；同一段对话在写入后几分钟内才可见；模型重写时仍可能带出细节，所以提示词要求「不复述、不出现人名/地址/命令/数字」。
+
+**下一步**：重启 DSH → 发帖 tab 试写（看是否出现对话素材）→ 手动发一条 → M3 回复引擎（先影子/dryRun）→ M5 迁移 → M6 发布 + 视频。
 
 ---
 
