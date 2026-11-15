@@ -4,7 +4,7 @@
 
 > 这是从一套跑了几个月的自用脚本（Python）重写来的。重写的原因很简单：公共插件不该要求用户装 Python、配另一套 key，也不该把规则散在命令行参数里。
 
-## 现在能做什么（v0.3.2）
+## 现在能做什么（v0.3.3）
 
 - **接入**：填实例地址 + 访问令牌，测试连接；支持 HTTP 代理（CONNECT 隧道），直连能通就不用填。
 - **设置页**：DSH → 设置 → 长毛象，分成五个页签：连接 / 回复 / 发帖 / 小本本 / 高级与日志。
@@ -25,7 +25,7 @@
 最省事的是预构建 tarball（GitHub Release，不用编译）：
 
 ```bash
-dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.2/dsh-mastodon-toot-0.3.2.tgz
+dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.3/dsh-mastodon-toot-0.3.3.tgz
 ```
 
 也可以从源码装：
