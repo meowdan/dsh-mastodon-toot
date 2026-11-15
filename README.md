@@ -22,11 +22,19 @@
 
 ## 安装
 
-插件还没上 npm。从 GitHub 装：
+最省事的是预构建 tarball（GitHub Release，不用编译）：
+
+```bash
+dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.0/dsh-mastodon-toot-0.3.0.tgz
+```
+
+也可以从源码装：
 
 ```bash
 dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot
 ```
+
+npm 包名已占好 `dsh-mastodon-toot`，等 npm 账号就绪再正式发。
 
 开发期用本地链接装：
 
