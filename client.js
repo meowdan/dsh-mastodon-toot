@@ -368,11 +368,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'mt-grid' },
             h(Row, { label: '每天上限', hint: '0 = 不限' }, h(Num, { value: cfg[k + 'MaxPerDay'], min: 0, max: 500, onChange: (v) => set(k + 'MaxPerDay', v) })),
             h(Row, { label: '每串上限' }, h(Num, { value: cfg[k + 'PerThread'], min: 0, max: 10, onChange: (v) => set(k + 'PerThread', v) })),
-            h(Row, { label: '冷却(分)', hint: '两次之间至少隔这么久' }, h(Num, { value: cfg[k + 'MinGapMin'], min: 0, max: 240, onChange: (v) => set(k + 'MinGapMin', v) }))))
+            h(Row, { label: '冷却(分)', hint: '两次之间至少隔这么久（只算时间线；@ 我走上面的「@ 必回」）' }, h(Num, { value: cfg[k + 'MinGapMin'], min: 0, max: 240, onChange: (v) => set(k + 'MinGapMin', v) }))))
       }
 
       const replyPane = () => h(React.Fragment, null,
-        h(Card, { title: '互动总开关', desc: '不按概率：按分组开关、每日额度、冷却、每串上限决定。@ 我和时间线分开算，每条决定都记小本本。' },
+        h(Card, { title: '互动总开关', desc: '不按概率：按分组开关、每日额度、冷却、每串上限决定。@ 我和时间线分开算，每条决定都记小本本。开了「@ 必回」时，@ 我不受冷却和夜间限制。' },
           h(Row, { label: '自动回复', hint: '关掉就完全不看通知和时间线' }, h(Toggle, { checked: !!cfg.autoReply, onChange: (v) => set('autoReply', v) })),
           h('div', { className: 'mt-inline' },
             h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'interact', onClick: runInteract },
@@ -410,7 +410,10 @@ window.__ModuleLoader__.load({
               className: 'mt-input', value: cfg.ownerAcct || '', placeholder: '例如 meowdan',
               onChange: (e) => set('ownerAcct', e.target.value),
             })),
-          h(Row, { label: '夜里安静', hint: '23:00–08:00 只回主人，其他人不主动回' }, h(Toggle, { checked: !!cfg.nightPause, onChange: (v) => set('nightPause', v) })),
+          h(Row, { label: '@ 必回', hint: '别人 @ 我 / 回我的嘟文：不看冷却、不挑时间，额度按倍数放宽；关掉就回到按分组冷却' }, h(Toggle, { checked: cfg.replyMentionsAlways !== false, onChange: (v) => set('replyMentionsAlways', v) })),
+          h(Row, { label: '必回额度倍数', hint: '必回时每天上限 × 这个倍数（防刷屏用，1 = 不放宽）' }, h(Num, { value: cfg.replyMentionQuotaFactor ?? 2, min: 1, max: 5, onChange: (v) => set('replyMentionQuotaFactor', v) })),
+          h(Row, { label: '主人发帖也回', hint: '主人自己发的帖（没 @ 我）也接一句' }, h(Toggle, { checked: cfg.replyOwnerFeed !== false, onChange: (v) => set('replyOwnerFeed', v) })),
+          h(Row, { label: '夜里安静', hint: '23:00–08:00 只主动回主人；开了「@ 必回」时别人 @ 我仍照回' }, h(Toggle, { checked: !!cfg.nightPause, onChange: (v) => set('nightPause', v) })),
           h(Row, { label: '只试不写', hint: 'dryRun：照常生成、记账，但不真的发' }, h(Toggle, { checked: !!cfg.dryRun, onChange: (v) => set('dryRun', v) })),
           h(Row, { label: '从不回的人', hint: '账号名，逗号分隔' },
             h('textarea', {
