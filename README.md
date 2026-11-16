@@ -4,7 +4,7 @@
 
 > 这是从一套跑了几个月的自用脚本（Python）重写来的。重写的原因很简单：公共插件不该要求用户装 Python、配另一套 key，也不该把规则散在命令行参数里。
 
-## 现在能做什么（v0.3.9）
+## 现在能做什么（v0.3.10）
 
 - **接入**：填实例地址 + 访问令牌，测试连接；支持 HTTP 代理（CONNECT 隧道），直连能通就不用填。
 - **设置页**：DSH → 设置 → 长毛象，分成五个页签：连接 / 回复 / 发帖 / 小本本 / 高级与日志。
@@ -32,7 +32,7 @@ dsh plugin --profile desktop add dsh-mastodon-toot
 也可以直接装 GitHub Release 的预构建 tarball：
 
 ```bash
-dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.9/dsh-mastodon-toot-0.3.9.tgz
+dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.10/dsh-mastodon-toot-0.3.10.tgz
 ```
 
 也可以从源码装：
@@ -125,6 +125,8 @@ lib/interact.mjs  互动引擎（v0.3）
 ```
 
 ## 更新记录
+
+- **v0.3.10**：修「同一条嘟文被发两遍」。13:46 旧 python 管道先发了一条（public），16:00 插件读同一份 B 站稿子又发了一遍（unlisted）——两套账互不知情。现在 doPost 发之前先拉我最近 40 条嘟文，把内容去空白、去链接后比对：完全相同或前 24 字相同就跳过并记账，不再发第二遍。设置页「队列」里加了「发前查重」开关（默认开）。
 
 - **v0.3.9**：修「同一条嘟文被回两遍」。根因不在这个插件：旧的 python 监听器（Mastodon/poster.py stream）和旧队列（meowbot-toot-drain）一直还在跑，两套各自记自己的账，撞同一条就各回一句（一条 unlisted 一条 public，肉眼一看就是重了）。现在已经把旧管道停掉（STOP 文件 + 两个计划任务禁用），插件里再加一道保险：生成回复要花几秒，发之前重新拉一次上下文，发现我已经回过就不发。
 

@@ -6,7 +6,7 @@ import { homeDirOf } from './lib/paths.mjs'
 import {
   loadConfig, importLegacyCreds, loadState, saveState, logLine,
 } from './lib/store.mjs'
-import { verify, instanceInfo, slimAccount, MastoError } from './lib/masto.mjs'
+import { api, verify, instanceInfo, slimAccount, MastoError } from './lib/masto.mjs'
 import { prune } from './lib/notebook.mjs'
 import { composePost } from './lib/compose.mjs'
 import { replyTick } from './lib/interact.mjs'
@@ -21,7 +21,7 @@ export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.3.9'
+const VERSION = '0.3.10'
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)
@@ -185,13 +185,49 @@ export function apply(ctx, _config) {
   }, 'mastodon-toot heartbeat')
 
   const textHash = (t) => createHash('sha1').update(t).digest('hex').slice(0, 16)
+
+  // 查重：同一段话已经在我主页上出现过的，绝不再发第二遍。
+  // 起因：旧 python 管道和插件各记各的账，同一条 bili 稿子 13:46 发过一次、16:00 又被插件当新稿发了一次。
+  const normText = (t) => String(t).replace(/https?:\/\/\S+/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '').trim()
+  const recentMemo = { at: 0, list: [] }
+  const recentOwnTexts = async () => {
+    if (Date.now() - recentMemo.at < 2 * 60 * 1000) return recentMemo.list
+    let id = state.account?.id
+    if (!id) {
+      try { state.account = slimAccount(await verify(creds)); id = state.account?.id } catch { /* 连不上就算了 */ }
+    }
+    if (!id) return recentMemo.list
+    try {
+      const { data } = await api(creds, `/api/v1/accounts/${id}/statuses?limit=40&exclude_replies=true&exclude_reblogs=true`)
+      recentMemo.list = (Array.isArray(data) ? data : []).map((s) => normText(s.content))
+      recentMemo.at = Date.now()
+    } catch { /* 查不了就照发，不能因为查重把正事卡住 */ }
+    return recentMemo.list
+  }
+  const looksDuplicate = async (text) => {
+    if (cfg.skipDuplicate === false) return false
+    const n = normText(text)
+    if (n.length < 12) return false
+    const head = n.slice(0, 24)
+    const seen = await recentOwnTexts()
+    const hit = seen.some((x) => x === n || (x.length >= 24 && x.slice(0, 24) === head))
+    if (hit) recentMemo.list.push(n)
+    return hit
+  }
+
   const doPost = async (text, source) => {
     if (cfg.dryRun) {
       logLine(dir, `[试写] ${source}：${String(text).slice(0, 60).replace(/\n/g, ' ')}`)
       return { dryRun: true }
     }
+    if (await looksDuplicate(text)) {
+      logLine(dir, `跳过重复（这段话已经发过）：${String(text).slice(0, 40).replace(/\n/g, ' ')}…`)
+      return { duplicate: true }
+    }
     const r = await publish(creds, text)
     recordPosted(dir, { hash: textHash(text), ...r, source })
+    recentMemo.list.push(normText(text))
+    recentMemo.at = Date.now()
     logLine(dir, `已发（${source}）：${String(text).slice(0, 50).replace(/\n/g, ' ')}…`)
     return r
   }

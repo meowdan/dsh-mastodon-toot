@@ -467,6 +467,7 @@ window.__ModuleLoader__.load({
           h(Row, { label: '队列发帖', hint: '总开关' }, h(Toggle, { checked: !!cfg.queueEnabled, onChange: (v) => set('queueEnabled', v) })),
           h(Row, { label: '含 B 站内容' }, h(Toggle, { checked: !!cfg.biliSource, onChange: (v) => set('biliSource', v) })),
           h(Row, { label: '含对话记录' }, h(Toggle, { checked: !!cfg.convSource, onChange: (v) => set('convSource', v) })),
+          h(Row, { label: '发前查重', hint: '同一段话已发过就不再发第二遍' }, h(Toggle, { checked: cfg.skipDuplicate !== false, onChange: (v) => set('skipDuplicate', v) })),
           h('div', { className: 'mt-grid' },
             h(Row, { label: '间隔最少(分)' }, h(Num, { value: cfg.queueGapMin, min: 1, max: 180, onChange: (v) => set('queueGapMin', v) })),
             h(Row, { label: '间隔最多(分)' }, h(Num, { value: cfg.queueGapMax, min: 1, max: 240, onChange: (v) => set('queueGapMax', v) }))),
