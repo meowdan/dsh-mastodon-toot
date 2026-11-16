@@ -367,7 +367,7 @@ window.__ModuleLoader__.load({
             h(Row, { label: '今天已回' }, h('span', { className: 'mt-muted' }, used + ' 条'))),
           h('div', { className: 'mt-grid' },
             h(Row, { label: '每天上限', hint: '0 = 不限' }, h(Num, { value: cfg[k + 'MaxPerDay'], min: 0, max: 500, onChange: (v) => set(k + 'MaxPerDay', v) })),
-            h(Row, { label: '每串上限' }, h(Num, { value: cfg[k + 'PerThread'], min: 0, max: 10, onChange: (v) => set(k + 'PerThread', v) })),
+            h(Row, { label: '每串上限', hint: '同一串最多回几次（@ 我时再放一条）' }, h(Num, { value: cfg[k + 'PerThread'], min: 0, max: 10, onChange: (v) => set(k + 'PerThread', v) })),
             h(Row, { label: '冷却(分)', hint: '两次之间至少隔这么久（只算时间线；@ 我走上面的「@ 必回」）' }, h(Num, { value: cfg[k + 'MinGapMin'], min: 0, max: 240, onChange: (v) => set(k + 'MinGapMin', v) }))))
       }
 
