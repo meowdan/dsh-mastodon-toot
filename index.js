@@ -12,7 +12,7 @@ import { composePost } from './lib/compose.mjs'
 import { replyTick } from './lib/interact.mjs'
 import { makeRouteHandler } from './lib/routes.mjs'
 import {
-  publish, dueSlot, dueQueueItem, markQueuePosted, recordPosted,
+  publish, dueSlot, dueQueueItem, markQueuePosted, recordPosted, normalizeQueue,
   ingestIfNeeded, slotsFor,
 } from './lib/posting.mjs'
 import { createHash } from 'node:crypto'
@@ -206,6 +206,8 @@ export function apply(ctx, _config) {
       state.lastIngestAt = Date.now()
       if (n) logLine(dir, `队列收了 ${n} 条（对话/B 站）`)
     }
+    const fixed = normalizeQueue(state, cfg)
+    if (fixed) logLine(dir, `队列时间修正 ${fixed} 条`)
     const item = dueQueueItem(state)
     if (item && cfg.queueEnabled !== false) {
       await doPost(item.text, item.source || 'queue')

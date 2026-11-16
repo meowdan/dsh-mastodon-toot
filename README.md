@@ -4,7 +4,7 @@
 
 > 这是从一套跑了几个月的自用脚本（Python）重写来的。重写的原因很简单：公共插件不该要求用户装 Python、配另一套 key，也不该把规则散在命令行参数里。
 
-## 现在能做什么（v0.3.6）
+## 现在能做什么（v0.3.7）
 
 - **接入**：填实例地址 + 访问令牌，测试连接；支持 HTTP 代理（CONNECT 隧道），直连能通就不用填。
 - **设置页**：DSH → 设置 → 长毛象，分成五个页签：连接 / 回复 / 发帖 / 小本本 / 高级与日志。
@@ -31,7 +31,7 @@ dsh plugin --profile desktop add dsh-mastodon-toot
 也可以直接装 GitHub Release 的预构建 tarball：
 
 ```bash
-dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.6/dsh-mastodon-toot-0.3.6.tgz
+dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.7/dsh-mastodon-toot-0.3.7.tgz
 ```
 
 也可以从源码装：
@@ -122,6 +122,11 @@ lib/compose.mjs   素材 → 提示词 → 正文
 lib/posting.mjs   排期 / 发布 / 发帖账本 / 队列
 lib/interact.mjs  互动引擎（v0.3）
 ```
+
+## 更新记录
+
+- **v0.3.7**：修两处让「嘟文发不出去」的 bug——① 代理隧道里 tls 连接走错了对象，配了 HTTP 代理也照样自己去解析域名（直连被墙就整条链路挂死）；② 队列间隔把毫秒当分钟乘，一条条错开变成一条比一条远（最远排到一年后），现在新入队和旧队列都会把离谱时间拉回 4–12 分钟。
+- **v0.3.6**：修设置页打字会跳回最上面。
 
 ## License
 
