@@ -21,7 +21,7 @@ export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.3.8'
+const VERSION = '0.3.9'
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)

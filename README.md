@@ -4,7 +4,7 @@
 
 > 这是从一套跑了几个月的自用脚本（Python）重写来的。重写的原因很简单：公共插件不该要求用户装 Python、配另一套 key，也不该把规则散在命令行参数里。
 
-## 现在能做什么（v0.3.8）
+## 现在能做什么（v0.3.9）
 
 - **接入**：填实例地址 + 访问令牌，测试连接；支持 HTTP 代理（CONNECT 隧道），直连能通就不用填。
 - **设置页**：DSH → 设置 → 长毛象，分成五个页签：连接 / 回复 / 发帖 / 小本本 / 高级与日志。
@@ -32,7 +32,7 @@ dsh plugin --profile desktop add dsh-mastodon-toot
 也可以直接装 GitHub Release 的预构建 tarball：
 
 ```bash
-dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.8/dsh-mastodon-toot-0.3.8.tgz
+dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/releases/download/v0.3.9/dsh-mastodon-toot-0.3.9.tgz
 ```
 
 也可以从源码装：
@@ -125,6 +125,8 @@ lib/interact.mjs  互动引擎（v0.3）
 ```
 
 ## 更新记录
+
+- **v0.3.9**：修「同一条嘟文被回两遍」。根因不在这个插件：旧的 python 监听器（Mastodon/poster.py stream）和旧队列（meowbot-toot-drain）一直还在跑，两套各自记自己的账，撞同一条就各回一句（一条 unlisted 一条 public，肉眼一看就是重了）。现在已经把旧管道停掉（STOP 文件 + 两个计划任务禁用），插件里再加一道保险：生成回复要花几秒，发之前重新拉一次上下文，发现我已经回过就不发。
 
 - **v0.3.8**：修「别人回复我却不回」。三处根源：① 算「这串回过几次」时把我自己那篇被回复的原帖也算进去了，别人一回我就判定「这串回够了」；② 陌生人 @ 我卡在 15 分钟冷却里，而每轮扫完又把通知游标推到最新，被挡的那条永久丢掉；③ 时间线只认顶层帖，主人在串里说的话看不见。现在 @ 我的一律必回（绕冷却、夜里也回、额度×2），游标只推进到真处理完的那条，另外补了「主人自己发的帖」这一路。
 - **v0.3.7**：修两处让「嘟文发不出去」的 bug——① 代理隧道里 tls 连接走错了对象，配了 HTTP 代理也照样自己去解析域名（直连被墙就整条链路挂死）；② 队列间隔把毫秒当分钟乘，一条条错开变成一条比一条远（最远排到一年后），现在新入队和旧队列都会把离谱时间拉回 4–12 分钟。
