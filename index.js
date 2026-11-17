@@ -16,12 +16,14 @@ import {
   ingestIfNeeded, slotsFor,
 } from './lib/posting.mjs'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 
 export const name = 'mastodon-toot'
 export const inject = ['webServer']
 
 const ROUTE = '/api/mastodon-toot'
-const VERSION = '0.3.11'
+// 版本号只认 package.json 一处，别再手写常量（0.3.12 漏改过一次）
+const VERSION = createRequire(import.meta.url)('./package.json').version
 
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj)
