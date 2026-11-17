@@ -1,6 +1,8 @@
-# 长毛象小本本 · dsh-mastodon-toot
+# 大肥鱼长毛象 bot
 
-把自己的 Mastodon（长毛象）bot 收进 DeepSeek Harness：接入、回复、小本本、边界开关，一个插件管完。
+部署在 Mastodon 的大肥鱼 bot：自己发 toot、自己回嘟文，带一个小本本，记下聊过的人和话。
+
+`dsh-mastodon-toot` · DeepSeek Harness 插件
 
 > 这是从一套跑了几个月的自用脚本（Python）重写来的。重写的原因很简单：公共插件不该要求用户装 Python、配另一套 key，也不该把规则散在命令行参数里。
 

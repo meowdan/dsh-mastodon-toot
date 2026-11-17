@@ -1,7 +1,7 @@
 {
   "name": "dsh-mastodon-toot",
   "version": "0.3.11",
-  "description": "长毛象小本本：把自己的 Mastodon bot 收进 DSH，带本地小本本、互动边界和发帖管线",
+  "description": "部署在 Mastodon 的大肥鱼 bot：自己发 toot、自己回嘟文，带一个小本本，记下聊过的人和话。DeepSeek Harness 插件。",
   "keywords": [
     "dsh",
     "dsh-plugin",

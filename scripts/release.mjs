@@ -21,9 +21,9 @@ const topics = await call(`https://api.github.com/repos/${repo}/topics`, {
 })
 console.log('topics:', topics.names.join(','))
 
-const body = `长毛象小本本 v${V}
+const body = `大肥鱼长毛象 bot v${V}
 
-把 Mastodon bot 收进 DSH：接入、分组互动（主人 / 好友 / 其他人，不掷骰子）、小本本、发帖管线、队列，全在一个设置页里。
+部署在 Mastodon 的大肥鱼 bot：自己发 toot、自己回嘟文，带一个小本本，记下聊过的人和话。分组互动（主人 / 好友 / 其他人，不掷骰子）、发帖管线、队列，全在一个设置页里。
 
 安装（预构建 tarball）：
 \`\`\`
@@ -36,7 +36,7 @@ dsh plugin --profile desktop add https://github.com/meowdan/dsh-mastodon-toot/re
 
 const rel = await call(`https://api.github.com/repos/${repo}/releases`, {
   method: 'POST',
-  body: JSON.stringify({ tag_name: 'v' + V, name: 'v' + V + ' — 长毛象小本本', body, draft: false, prerelease: false }),
+  body: JSON.stringify({ tag_name: 'v' + V, name: 'v' + V + ' — 大肥鱼长毛象 bot', body, draft: false, prerelease: false }),
 })
 console.log('release:', rel.html_url)
 

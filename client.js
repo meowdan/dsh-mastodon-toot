@@ -532,7 +532,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'mt-root' },
         h('header', { className: 'mt-head' },
           h('div', null,
-            h('h2', null, '长毛象小本本'),
+            h('h2', null, '大肥鱼长毛象 bot'),
             h('p', { className: 'mt-sub' },
               account
                 ? `@${account.acct} @ ${st.creds?.instance || ''}`
