@@ -422,6 +422,9 @@ window.__ModuleLoader__.load({
               onChange: (e) => set('blocklist', e.target.value),
             }))))
 
+      const pst = posting?.stats || null
+      const maxN = pst ? Math.max(1, ...pst.daily.map((d) => d.n)) : 1
+
       const src = (k, label, hint) => h(Row, { label, hint }, h(Toggle, { checked: !!cfg[k], onChange: (v) => set(k, v) }))
 
       const postPane = () => h(React.Fragment, null,
@@ -437,6 +440,22 @@ window.__ModuleLoader__.load({
             h(Row, { label: '开始' }, h('input', { type: 'time', className: 'mt-input', value: cfg.windowStart, onChange: (e) => set('windowStart', e.target.value) })),
             h(Row, { label: '结束' }, h('input', { type: 'time', className: 'mt-input', value: cfg.windowEnd, onChange: (e) => set('windowEnd', e.target.value) }))),
           h(Row, { label: '只在工作日' }, h(Toggle, { checked: !!cfg.weekdaysOnly, onChange: (v) => set('weekdaysOnly', v) }))),
+        h(Card, { title: '发帖数据', desc: '从本机账本数的：最近 7 天发了多少、从哪来的、最后一条什么时候。' },
+          !pst ? h('small', { className: 'mt-muted' }, '…') : h(React.Fragment, null,
+            h('div', { className: 'mt-grid' },
+              h(Row, { label: '今天' }, h('strong', null, pst.today + ' 条')),
+              h(Row, { label: '最近 7 天' }, h('strong', null, pst.week + ' 条')),
+              h(Row, { label: '账本累计', hint: '最多留 300 条' }, h('strong', null, pst.total + ' 条'))),
+            h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 6, height: 48, margin: '10px 0 6px' } },
+              pst.daily.map((d) => h('div', { key: d.date, title: d.date + '：' + d.n + ' 条', style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 } },
+                h('div', { style: { width: '100%', borderRadius: 3, background: 'currentColor', opacity: d.n ? 0.7 : 0.12, height: Math.max(3, Math.round(26 * (d.n / maxN))) } }),
+                h('small', { className: 'mt-muted', style: { fontSize: 10, lineHeight: 1 } }, d.date.slice(3))))),
+            pst.bySource.length
+              ? h('small', { className: 'mt-muted' }, '来源：' + pst.bySource.map((x) => x.source + ' ' + x.n).join(' · '))
+              : null,
+            h('small', { className: 'mt-muted', style: { display: 'block', marginTop: 4 } },
+              pst.last ? '最近一条 ' + fmtTime(pst.last.at) + '（' + pst.last.source + '） ' : '还没发过。',
+              pst.last && pst.last.url ? h('a', { href: pst.last.url, target: '_blank', rel: 'noreferrer' }, '看') : null))),
         h(Card, { title: '素材', desc: '勾上的才进选材池。天气失败不编，新闻不复述标题，旧博客不当新闻；对话从本机会话里挑，带隐私的整段跳过。' },
           h('div', { className: 'mt-grid' },
             src('srcWeather', '天气'),

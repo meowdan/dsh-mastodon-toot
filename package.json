@@ -1,6 +1,6 @@
 {
   "name": "dsh-mastodon-toot",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "长毛象小本本：把自己的 Mastodon bot 收进 DSH，带本地小本本、互动边界和发帖管线",
   "keywords": [
     "dsh",
