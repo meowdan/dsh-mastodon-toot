@@ -12,11 +12,13 @@ import { composePost } from './lib/compose.mjs'
 import { replyTick } from './lib/interact.mjs'
 import { makeRouteHandler } from './lib/routes.mjs'
 import {
-  publish, dueSlot, dueQueueItem, markQueuePosted, recordPosted, normalizeQueue,
+  publish, dueSlot, dueQueueItem, markQueuePosted, removeQueueItem, recordPosted, normalizeQueue,
   ingestIfNeeded, slotsFor,
 } from './lib/posting.mjs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { normText, textHash, simDice, isDuplicate, saidPool, ledgerTexts, sanityText } from './lib/dedup.mjs'
+import { generate } from './lib/llm.mjs'
 
 export const name = 'mastodon-toot'
 export const inject = ['webServer']
@@ -49,15 +51,31 @@ function readBody(req, limit = 64 * 1024) {
   })
 }
 
-function sameOrigin(req) {
+/**
+ * 本机/同源兜底。只在拿不到 DSH 信任栅栏（connection.requestRejection）时才当门用。
+ *
+ * 0.3.13 及以前这里把 Host 写死成 127.0.0.1/localhost/[::1]，结果从反代域名
+ * （例如 https://deepseek.gdyxkj.com.cn → 127.0.0.1:3080）打开设置页时，所有
+ * /api/mastodon-toot 请求都被判成「只接受本机同源请求」，读状态/保存设置全 403。
+ * 栅栏本身已经校验 Host/Origin（回环、绑定地址、--trusted-host 都认），所以这里
+ * 只负责浏览器侧的同源比较：Origin/Referer 的 authority 必须与 Host 一致。
+ *
+ * @param req 原始请求
+ * @param opts.loopbackOnly = true 时保留旧的「Host 必须是回环」限制（栅栏不可用时的保守兜底）
+ */
+function sameOrigin(req, { loopbackOnly = false } = {}) {
   const host = String(req.headers.host || '')
   if (!host) return true // 非浏览器调用（curl/自测）
-  if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) return false
+  if (loopbackOnly && !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) return false
   const pick = String(req.headers.origin || req.headers.referer || '')
-  if (!pick) return true
+  if (!pick) return true // 不是浏览器发的（本机脚本/宿主内部）
   try {
     const u = new URL(pick)
-    return String(u.host || '').toLowerCase() === host.toLowerCase()
+    const scheme = u.protocol === 'https:' ? 'https:' : u.protocol === 'http:' ? 'http:' : ''
+    if (!scheme) return false
+    // Host 可能不带端口（反代转发时），按 Origin 的 scheme 补默认端口后再比
+    const hostUrl = new URL(`${scheme}//${host}`)
+    return u.host === hostUrl.host
   } catch {
     return false
   }
@@ -84,7 +102,7 @@ function makeFence(ctx, log) {
     if (!conn) log('没有 connection 服务，只用本机同源校验')
     return conn
   }
-  return (req, res) => {
+  const reject = (req, res) => {
     const c = getConn()
     if (!c) return false
     try {
@@ -100,6 +118,9 @@ function makeFence(ctx, log) {
       return true
     }
   }
+  // 栅栏可用时它就是真鉴权（含 Host/Origin 校验），路由层不必再叠一道回环限制
+  reject.available = () => !!getConn()
+  return reject
 }
 
 function errText(e) {
@@ -186,11 +207,9 @@ export function apply(ctx, _config) {
     return () => clearInterval(timer)
   }, 'mastodon-toot heartbeat')
 
-  const textHash = (t) => createHash('sha1').update(t).digest('hex').slice(0, 16)
-
-  // 查重：同一段话已经在我主页上出现过的，绝不再发第二遍。
-  // 起因：旧 python 管道和插件各记各的账，同一条 bili 稿子 13:46 发过一次、16:00 又被插件当新稿发了一次。
-  const normText = (t) => String(t).replace(/https?:\/\/\S+/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '').trim()
+  // 查重增强版（v0.3.15）：账本 + 队列 + 主页最近 100 条，bigram Dice ≥ 0.6 也算重复
+  // v0.3.16：字面相似的直接拦；字面不太像（0.15–0.6）但可能是同一件事的灰区候选，
+  // 交给 LLM 判「是不是同一件事」——措辞彻底重写（凌晨挤果醋 vs 凌晨挤果醋这事我干过一次）也能兜住。
   const recentMemo = { at: 0, list: [] }
   const recentOwnTexts = async () => {
     if (Date.now() - recentMemo.at < 2 * 60 * 1000) return recentMemo.list
@@ -200,34 +219,84 @@ export function apply(ctx, _config) {
     }
     if (!id) return recentMemo.list
     try {
-      const { data } = await api(creds, `/api/v1/accounts/${id}/statuses?limit=40&exclude_replies=true&exclude_reblogs=true`)
+      const { data } = await api(creds, `/api/v1/accounts/${id}/statuses?limit=100&exclude_replies=true&exclude_reblogs=true`)
       recentMemo.list = (Array.isArray(data) ? data : []).map((s) => normText(s.content))
       recentMemo.at = Date.now()
     } catch { /* 查不了就照发，不能因为查重把正事卡住 */ }
     return recentMemo.list
   }
-  const looksDuplicate = async (text) => {
+
+  // 语义灰区复审：失败/拿不到 LLM 就当「不像重复」放行，绝不让查重卡死发帖
+  async function asksSemanticDuplicate(n, cand, source) {
+    try {
+      const system =
+        '你在帮一个长毛象 bot 查重。现在已经有很多条嘟文发出去了，' +
+        '现在要判断一条新的嘟文是不是和历史上某一条在说同一件事。' +
+        '只回答 JSON：{"dup": true|false, "why": "一句话理由"}。'
+      const prompt =
+        `历史嘟文（已发过）：\n「${String(cand).slice(0, 200)}」\n\n` +
+        `新嘟文：\n「${String(n).slice(0, 200)}」\n\n` +
+        '是不是在说同一件事（同一件事哪怕换措辞、换角度也算重复）？只输出 JSON。'
+      const { text } = await generate(ctx, cfg, { system, prompt, maxTokens: 80, temperature: 0 })
+      const m = String(text || '').match(/"(?:dup|duplicate)"\s*:\s*(true|false)/)
+      return m ? m[1] === 'true' : false
+    } catch {
+      return false
+    }
+  }
+
+  const looksDuplicate = async (text, opts = {}) => {
     if (cfg.skipDuplicate === false) return false
     const n = normText(text)
     if (n.length < 12) return false
-    const head = n.slice(0, 24)
-    const seen = await recentOwnTexts()
-    const hit = seen.some((x) => x === n || (x.length >= 24 && x.slice(0, 24) === head))
-    if (hit) recentMemo.list.push(n)
-    return hit
+    // ① 账本查重（300 条全查）+ 队列（排除自己，否则自己比自己必判重复）+ 主页最近 100 条
+    try {
+      const ledger = ledgerTexts(dir)
+      const ex = new Set(opts.excludeIds || [])
+      const qPool = (state.queue || []).filter((x) => !ex.has(x.id))
+      const pool = saidPool({ ledger: ledger.map((t) => ({ n: t })), queue: qPool, recent: await recentOwnTexts() })
+      const grayZone = []
+      for (const existing of pool) {
+        if (isDuplicate(n, existing)) {
+          recentMemo.list.push(n)
+          return true
+        }
+        // 灰区：bigram 0.15–0.6 —— 字面不够像，但可能是同一件事（措辞重写）。
+        // 只收 top 3，LLM 复审开销最小；<0.15 基本是不同话题，不浪费查询。
+        const d = simDice(n, existing)
+        if (d >= 0.15 && d < 0.6) grayZone.push({ d, t: existing })
+      }
+      if (grayZone.length) {
+        grayZone.sort((a, b) => b.d - a.d)
+        const src = opts.source || 'compose'
+        for (const g of grayZone.slice(0, 3)) {
+          if (await asksSemanticDuplicate(n, g.t, src)) {
+            recentMemo.list.push(n)
+            logLine(dir, `语义判重（${src} vs 灰区 重复「${String(g.t).slice(0, 30)}…」dice=${g.d.toFixed(3)}）：${String(text).slice(0, 40)}…`)
+            return true
+          }
+        }
+      }
+    } catch { /* 账本读坏了也别卡 */ }
+    return false
   }
 
-  const doPost = async (text, source) => {
+  const doPost = async (text, source, opts = {}) => {
     if (cfg.dryRun) {
       logLine(dir, `[试写] ${source}：${String(text).slice(0, 60).replace(/\n/g, ' ')}`)
       return { dryRun: true }
     }
-    if (await looksDuplicate(text)) {
-      logLine(dir, `跳过重复（这段话已经发过）：${String(text).slice(0, 40).replace(/\n/g, ' ')}…`)
+    const sanity = sanityText(text, { kind: 'post' })
+    if (!sanity.ok) {
+      logLine(dir, `发帖拦截（${sanity.why}）：${String(text).slice(0, 40).replace(/\n/g, ' ')}…`)
+      return { blocked: true, why: sanity.why }
+    }
+    if (await looksDuplicate(text, opts)) {
+      logLine(dir, `跳过重复（账本/队列/主页）：${String(text).slice(0, 40).replace(/\n/g, ' ')}…`)
       return { duplicate: true }
     }
     const r = await publish(creds, text)
-    recordPosted(dir, { hash: textHash(text), ...r, source })
+    recordPosted(dir, { hash: textHash(text), n: normText(text), text: String(text), ...r, source })
     recentMemo.list.push(normText(text))
     recentMemo.at = Date.now()
     logLine(dir, `已发（${source}）：${String(text).slice(0, 50).replace(/\n/g, ' ')}…`)
@@ -248,20 +317,42 @@ export function apply(ctx, _config) {
     if (fixed) logLine(dir, `队列时间修正 ${fixed} 条`)
     const item = dueQueueItem(state)
     if (item && cfg.queueEnabled !== false) {
-      await doPost(item.text, item.source || 'queue')
-      markQueuePosted(state, item.id)
-      state.lastPostAt = Date.now()
-      state.lastPostError = ''
-      saveState(dir, state)
+      // 查重时排除自己（自己还没发，不算重复），只和账本/其它队列条目/主页比
+      const r = await doPost(item.text, item.source || 'queue', { excludeIds: [item.id] })
+      // 只有真正发出去才算队列消费；重复/拦截/试写都不该白耗条目，等下轮还能重试
+      if (r && (r.ok || r.id)) {
+        markQueuePosted(state, item.id)
+        state.lastPostAt = Date.now()
+        state.lastPostError = ''
+        saveState(dir, state)
+        return
+      }
+      if (r && r.blocked) { return }
+      if (r && r.duplicate) {
+        // 真重复：这是主页/账本里已经发过的内容，留着只会每分钟重试卡死队列（live2D 那条就是）。
+        // 直接移出队列，别再占位。
+        removeQueueItem(state, item.id)
+        saveState(dir, state)
+        logLine(dir, `队列移除重复：${String(item.text).slice(0, 40).replace(/\n/g, ' ')}…`)
+        return
+      }
+      if (r && r.dryRun) { return }
+      // 其它情况（失败/异常）：也先留着，别把没发出去的丢掉
       return
     }
     const slot = dueSlot(state, cfg)
     if (!slot) { saveState(dir, state); return }
     const { text, names } = await composePost(ctx, cfg, dir, { creds })
-    await doPost(text, names.join('+') || 'compose')
+    const r = await doPost(text, names.join('+') || 'compose')
+    // 排期槽位发出的内容被判重复/拦截/失败时：槽位照常消耗、绝不重试同一段，
+    // 避免每分钟死磕浪费 LLM（宁缺毋滥，防重复优先）；lastPostAt 只在真发出时才更新
+    if (!(r && (r.ok || r.id))) {
+      logLine(dir, `排期槽位 ${slot}：${r?.duplicate ? '内容与已发重复，本槽不发' : r?.blocked ? '被敏感/格式拦截' : '发布未成功'}（槽位照常消耗，下个槽点再生成新话题）`)
+    } else {
+      state.lastPostAt = Date.now()
+    }
     state.posting.used = [...(state.posting.used || []), slot]
     state.posting.lastAt = Date.now()
-    state.lastPostAt = Date.now()
     state.lastPostError = ''
     saveState(dir, state)
   }
