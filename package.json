@@ -1,6 +1,6 @@
 {
   "name": "dsh-mastodon-toot",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "部署在 Mastodon 的大肥鱼 bot：自己发 toot、自己回嘟文，带一个小本本，记下聊过的人和话。DeepSeek Harness 插件。",
   "keywords": [
     "dsh",

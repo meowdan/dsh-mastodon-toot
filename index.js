@@ -17,7 +17,7 @@ import {
 } from './lib/posting.mjs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { normText, textHash, simDice, isDuplicate, saidPool, ledgerTexts, sanityText } from './lib/dedup.mjs'
+import { normText, textHash, simDice, simWordDice, isDuplicate, saidPool, ledgerTexts, sanityText } from './lib/dedup.mjs'
 import { generate } from './lib/llm.mjs'
 
 export const name = 'mastodon-toot'
@@ -241,7 +241,7 @@ export function apply(ctx, _config) {
       const m = String(text || '').match(/"(?:dup|duplicate)"\s*:\s*(true|false)/)
       return m ? m[1] === 'true' : false
     } catch {
-      return false
+      return { error: true }
     }
   }
 
@@ -266,13 +266,27 @@ export function apply(ctx, _config) {
         const d = simDice(n, existing)
         if (d >= 0.15 && d < 0.6) grayZone.push({ d, t: existing })
       }
+      // 词级强通道（v0.3.16）：同主题重写，措辞换个说法但实词还撞着
+      // 果醋/木碗/广州/闹钟… 这类 ≥2 字词命中足够多 → 不依赖 LLM 直接判重
+      for (const existing of pool) {
+        const wd = simWordDice(n, existing)
+        if (wd >= 0.22) {
+          recentMemo.list.push(n)
+          logLine(dir, '词级判重（' + (opts.source || 'compose') + ' vs ' + String(existing).slice(0, 30) + '…）wordDice=' + wd.toFixed(3) + '：' + String(text).slice(0, 40) + '…')
+          return true
+        }
+      }
       if (grayZone.length) {
         grayZone.sort((a, b) => b.d - a.d)
         const src = opts.source || 'compose'
         for (const g of grayZone.slice(0, 3)) {
-          if (await asksSemanticDuplicate(n, g.t, src)) {
+          const verdict = await asksSemanticDuplicate(n, g.t, src)
+          // 失败（LLM 链路不稳）时保守拦截：拿不准就当重复，宁缺毋滥 —— 用户要的是「不要发重复」
+          if (verdict && (verdict === true || verdict.error)) {
             recentMemo.list.push(n)
-            logLine(dir, `语义判重（${src} vs 灰区 重复「${String(g.t).slice(0, 30)}…」dice=${g.d.toFixed(3)}）：${String(text).slice(0, 40)}…`)
+            logLine(dir, verdict.error
+              ? '语义判重（LLM 不可用，保守拦截）：' + String(text).slice(0, 40) + '…'
+              : `语义判重（${src} vs 灰区 重复「${String(g.t).slice(0, 30)}…」dice=${g.d.toFixed(3)}）：${String(text).slice(0, 40)}…`)
             return true
           }
         }
