@@ -13,10 +13,11 @@ import { replyTick } from './lib/interact.mjs'
 import { makeRouteHandler } from './lib/routes.mjs'
 import {
   publish, dueSlot, dueQueueItem, markQueuePosted, removeQueueItem, recordPosted, normalizeQueue,
-  ingestIfNeeded, slotsFor,
+  enforceQueueSpacing, ingestIfNeeded, slotsFor, inPostingWindow,
 } from './lib/posting.mjs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { ensureDefault, autoSnapshot } from './lib/character.mjs'
 import { normText, textHash, simDice, simWordDice, isDuplicate, saidPool, ledgerTexts, sanityText } from './lib/dedup.mjs'
 import { generate } from './lib/llm.mjs'
 
@@ -168,6 +169,13 @@ export function apply(ctx, _config) {
     } catch (e) { logLine(dir, '小本本清理失败：' + errText(e)) }
   }
 
+  // 角色卡：没有就建一张（老 personaFile/personaText 内容自动迁移进去），顺手留今天的自动存档
+  try {
+    const characterId = ensureDefault(dir, cfg)
+    autoSnapshot(dir, characterId)
+    logLine(dir, `角色卡就绪：${characterId}`)
+  } catch (e) { logLine(dir, '角色卡初始化失败：' + errText(e)) }
+
   const refreshAccount = async (target = creds) => {
     const acc = slimAccount(await verify(target))
     const info = await instanceInfo(target).catch(() => null)
@@ -270,7 +278,10 @@ export function apply(ctx, _config) {
       // 果醋/木碗/广州/闹钟… 这类 ≥2 字词命中足够多 → 不依赖 LLM 直接判重
       for (const existing of pool) {
         const wd = simWordDice(n, existing)
-        if (wd >= 0.22) {
+        // 0.22 太松：两条说的根本不是同一件事，只要都提到「Claude/DSH/视频/分/秒」这类词就能撞到 0.22，
+        // 实测把「宝玉把 Claude Design 搬进 DSH」判成了「FFmpeg 逐帧」那条的重复（wordDice=0.237），
+        // 整条嘟文被移出队列（队列移除重复）就再也发不出去。抬到 0.45，只在实词大面积重合时才走这条强通道。
+        if (wd >= 0.45) {
           recentMemo.list.push(n)
           logLine(dir, '词级判重（' + (opts.source || 'compose') + ' vs ' + String(existing).slice(0, 30) + '…）wordDice=' + wd.toFixed(3) + '：' + String(text).slice(0, 40) + '…')
           return true
@@ -281,13 +292,15 @@ export function apply(ctx, _config) {
         const src = opts.source || 'compose'
         for (const g of grayZone.slice(0, 3)) {
           const verdict = await asksSemanticDuplicate(n, g.t, src)
-          // 失败（LLM 链路不稳）时保守拦截：拿不准就当重复，宁缺毋滥 —— 用户要的是「不要发重复」
-          if (verdict && (verdict === true || verdict.error)) {
+          // 失败（LLM 链路不稳）时按上面那行注释说的放行，不拦：拿不准就发出去，
+          // 宁可偶尔一条近重复，也别在模型欠费/超时时把整条队列静默吞掉（发帖失败「Sign up for free」这类就是）
+          if (verdict === true) {
             recentMemo.list.push(n)
-            logLine(dir, verdict.error
-              ? '语义判重（LLM 不可用，保守拦截）：' + String(text).slice(0, 40) + '…'
-              : `语义判重（${src} vs 灰区 重复「${String(g.t).slice(0, 30)}…」dice=${g.d.toFixed(3)}）：${String(text).slice(0, 40)}…`)
+            logLine(dir, `语义判重（${src} vs 灰区 重复「${String(g.t).slice(0, 30)}…」dice=${g.d.toFixed(3)}）：${String(text).slice(0, 40)}…`)
             return true
+          }
+          if (verdict && verdict.error) {
+            logLine(dir, '语义判重（LLM 不可用，放行）：' + String(text).slice(0, 40) + '…')
           }
         }
       }
@@ -322,6 +335,10 @@ export function apply(ctx, _config) {
   const tick = async () => {
     if (!creds.token || state.paused) return
     if (!cfg.postingEnabled) return
+    // 窗口闸：出了 windowStart..windowEnd 一律不发。
+    // 队列那条路完全不看窗口，到点就往外吐（2026-11-23 00:38 那条就是这么发出去的）；
+    // 槽位的 graceMin 也会把 23:50 的点拖到 01:50 才发。闸放在这里最保险。
+    if (!inPostingWindow(cfg)) return
     if (Date.now() - Number(state.lastIngestAt || 0) > 5 * 60 * 1000) {
       const n = ingestIfNeeded(state, dir, cfg)
       state.lastIngestAt = Date.now()
@@ -329,19 +346,46 @@ export function apply(ctx, _config) {
     }
     const fixed = normalizeQueue(state, cfg)
     if (fixed) logLine(dir, `队列时间修正 ${fixed} 条`)
+    const spaced = enforceQueueSpacing(state, cfg)
+    if (spaced) logLine(dir, `队列错峰 ${spaced} 条`)
     const item = dueQueueItem(state)
     if (item && cfg.queueEnabled !== false) {
+      // 硬闸：距上一条（不管是队列还是排期槽）不足 queueGapMin 就不发，宁可晚一轮
+      const minGapMs = Math.max(1, Number(cfg.queueGapMin) || 4) * 60000
+      const lastAt = Math.max(Number(state.lastPostAt || 0), Number(state.posting?.lastAt || 0))
+      if (Date.now() - lastAt < minGapMs) return
       // 查重时排除自己（自己还没发，不算重复），只和账本/其它队列条目/主页比
       const r = await doPost(item.text, item.source || 'queue', { excludeIds: [item.id] })
       // 只有真正发出去才算队列消费；重复/拦截/试写都不该白耗条目，等下轮还能重试
       if (r && (r.ok || r.id)) {
         markQueuePosted(state, item.id)
         state.lastPostAt = Date.now()
+        // 排期槽用的是 posting.lastAt，不同步的话队列刚发完、槽位下一分钟就会接着发
+        if (state.posting) state.posting.lastAt = state.lastPostAt
         state.lastPostError = ''
         saveState(dir, state)
         return
       }
-      if (r && r.blocked) { return }
+      if (r && r.blocked) {
+        // 长度超限是确定性失败：裁剪会毁掉原意，重试又永远发不出去，
+        // 而 blocked 留着条目 = 它一直占队首，把后面所有条目一起堵死。
+        // 所以隔离到 state.quarantine（原文留着可捞回），队列放行。
+        if (/长度/.test(String(r.why || ''))) {
+          state.quarantine = (Array.isArray(state.quarantine) ? state.quarantine : []).concat([{
+            id: item.id,
+            why: r.why,
+            len: String(item.text).length,
+            source: item.source || 'queue',
+            at: Date.now(),
+            text: String(item.text),
+          }])
+          removeQueueItem(state, item.id)
+          saveState(dir, state)
+          logLine(dir, `队列隔离超长条目（${String(item.text).length} 字）：${String(item.text).slice(0, 40).replace(/\n/g, ' ')}…`)
+          return
+        }
+        return
+      }
       if (r && r.duplicate) {
         // 真重复：这是主页/账本里已经发过的内容，留着只会每分钟重试卡死队列（live2D 那条就是）。
         // 直接移出队列，别再占位。

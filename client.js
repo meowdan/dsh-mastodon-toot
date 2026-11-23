@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
     const { useState, useEffect, useCallback } = React
+    const UI_VER = 'ui-2026-11-23c'
 
     const API = '/api/mastodon-toot'
 
@@ -82,9 +83,11 @@ window.__ModuleLoader__.load({
 
     const TABS = [
       ['conn', '连接'],
+      ['persona', '人设'],
+      ['character', '人格'],
       ['reply', '回复'],
       ['post', '发帖'],
-      ['book', '小本本'],
+      ['memory', '记忆'],
       ['adv', '高级与日志'],
     ]
 
@@ -167,6 +170,193 @@ window.__ModuleLoader__.load({
                   h('div', { className: 'mt-list-side' },
                     h('span', { className: 'mt-muted' }, fmtTime(r.t))))))),
       )
+    }
+
+    /** 人设页：四层角色卡（我是谁/口吻/日常/场景）+ 身份锚 + 喂给模型的预览 */
+    function PersonaPane() {
+      const [data, setData] = useState(null)
+      const [files, setFiles] = useState({})
+      const [meta, setMeta] = useState({ name: '', selfName: '', ownerName: '' })
+      const [err, setErr] = useState('')
+      const [msg, setMsg] = useState(null)
+      const [busy, setBusy] = useState('')
+
+      const load = useCallback(async () => {
+        try {
+          const d = await jget('/character')
+          setData(d)
+          setFiles(d.character?.files || {})
+          setMeta({
+            name: d.character?.meta?.name || '',
+            selfName: d.character?.meta?.selfName || '',
+            ownerName: d.character?.meta?.ownerName || '',
+          })
+          setErr('')
+        } catch (e) { setErr(e.message) }
+      }, [])
+      useEffect(() => { load() }, [load])
+
+      const save = async () => {
+        setBusy('save'); setMsg(null)
+        try {
+          const d = await jpost('/character', { action: 'save', id: data?.currentId, files, meta })
+          setData((prev) => ({ ...prev, preview: d.preview, character: d.character }))
+          setMsg({ kind: 'ok', text: '已保存（保存前自动留 before-save 快照）' })
+        } catch (e) { setMsg({ kind: 'bad', text: e.message }) }
+        setBusy('')
+      }
+
+      if (err) return h(Card, { title: '人设', desc: '角色卡' }, h('div', { className: 'mt-alert' }, err))
+      if (!data) return h(Card, { title: '人设', desc: '正在读角色卡…' }, null)
+
+      const label = data.filesLabel || {}
+      const FIELDS = ['persona', 'tone', 'daily', 'scenes']
+      const hint = {
+        persona: '你是谁：来历、性格、和主人的关系。别写「我是一个 AI 助手」。',
+        tone: '怎么说话：句子长短、爱用什么词、绝不用什么词。',
+        daily: '你的日常：作息、在做什么、最近在追什么。',
+        scenes: '遇到场景怎么反应：被 @、看到番剧、看到新闻、被人骂。',
+      }
+      const setField = (f) => (e) => setFiles((prev) => ({ ...prev, [f]: e.target.value }))
+
+      return h('div', { className: 'mt-char' },
+        h(Card, { title: '身份锚', desc: '这三句会注入每条嘟文和回复的提示词；名字对不上，它写起来就不像自己。只填了名字也能用。' },
+          h('div', { className: 'mt-inline' },
+            h('input', { className: 'mt-input', placeholder: '角色名（显示用）', value: meta.name || '', onChange: (e) => setMeta({ ...meta, name: e.target.value }) }),
+            h('input', { className: 'mt-input', placeholder: '自称 / 我是谁', value: meta.selfName || '', onChange: (e) => setMeta({ ...meta, selfName: e.target.value }) }),
+            h('input', { className: 'mt-input', placeholder: '主人账号（@名）', value: meta.ownerName || '', onChange: (e) => setMeta({ ...meta, ownerName: e.target.value }) }))),
+        h(Card, { title: `角色卡 · ${data.currentId}`, desc: '四层分开写，比一句 prompt 稳；保存只覆盖对应层，不删旧的。' },
+          FIELDS.map((f) => h('div', { key: f, className: 'mt-field' },
+            h('div', { className: 'mt-inline' },
+              h('label', { className: 'mt-label' }, label[f] || f),
+              h('small', { className: 'mt-muted' }, `${(files[f] || '').length} 字 / 上限 1200`)),
+            h('textarea', {
+              className: 'mt-input mt-area', rows: 4, placeholder: hint[f],
+              value: files[f] || '', onChange: setField(f),
+            }))),
+          h('div', { className: 'mt-inline' },
+            h('button', { type: 'button', className: 'mt-btn mt-btn-primary', disabled: busy === 'save', onClick: save },
+              busy === 'save' ? '保存中…' : '保存角色卡'),
+            msg ? h('span', { className: 'mt-msg ' + msg.kind }, msg.text) : null)),
+        h(Card, { title: '喂给模型的完整角色包（预览）', desc: '总预算 3000 字；发帖和回复时拼在 system 提示后面。' },
+          h('pre', { className: 'mt-pre' }, data.preview || '（还没有内容——上面写点字再保存）')))
+    }
+
+    /** 人格页：角色列表 / 切换 / 新建 / 快照与恢复 */
+    function CharacterPane() {
+      const [data, setData] = useState(null)
+      const [err, setErr] = useState('')
+      const [busy, setBusy] = useState('')
+      const [msg, setMsg] = useState(null)
+      const [nv, setNv] = useState({ name: '', selfName: '', ownerName: '' })
+
+      const load = useCallback(async () => {
+        try { setData(await jget('/character')); setErr('') } catch (e) { setErr(e.message) }
+      }, [])
+      useEffect(() => { load() }, [load])
+
+      const act = async (body, okText) => {
+        setBusy(body.action); setMsg(null)
+        try {
+          const d = await jpost('/character', body)
+          await load()
+          setMsg({ kind: 'ok', text: okText || '好了' })
+          return d
+        } catch (e) { setMsg({ kind: 'bad', text: e.message }); return null } finally { setBusy('') }
+      }
+
+      if (err) return h(Card, { title: '人格', desc: '角色卡' }, h('div', { className: 'mt-alert' }, err))
+      if (!data) return h(Card, { title: '人格', desc: '正在读…' }, null)
+      const cur = data.character
+
+      return h('div', null,
+        h(Card, { title: '角色卡', desc: '一个角色 = 一套人设，随时切换；切换前给旧角色自动打一份 before-switch 快照。' },
+          h('div', { className: 'mt-list' },
+            data.characters.map((c) => h('div', { key: c.id, className: 'mt-list-row' },
+              h('div', { className: 'mt-list-main' },
+                h('span', { className: 'mt-kind ' + (c.current ? 'ok' : 'warn') }, c.current ? '当前' : '备用'),
+                h('span', null, c.name || c.id),
+                c.selfName ? h('span', { className: 'mt-muted' }, `自称「${c.selfName}」`) : null),
+              h('div', { className: 'mt-list-side' },
+                c.current ? null : h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'switch', onClick: () => act({ action: 'switch', id: c.id }, `已切到 ${c.name || c.id}`) }, '切换'),
+                c.current ? null : h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'delete', onClick: () => act({ action: 'delete', id: c.id }, '已移入 .trash') }, '删除'))))),
+          h('div', { className: 'mt-inline' },
+            h('input', { className: 'mt-input', placeholder: '新角色名', value: nv.name, onChange: (e) => setNv({ ...nv, name: e.target.value }) }),
+            h('input', { className: 'mt-input', placeholder: '自称（可空）', value: nv.selfName, onChange: (e) => setNv({ ...nv, selfName: e.target.value }) }),
+            h('input', { className: 'mt-input', placeholder: '主人（可空）', value: nv.ownerName, onChange: (e) => setNv({ ...nv, ownerName: e.target.value }) }),
+            h('button', {
+              type: 'button', className: 'mt-btn mt-btn-primary',
+              disabled: busy === 'create' || !nv.name.trim(),
+              onClick: async () => {
+                const d = await act({ action: 'create', name: nv.name, selfName: nv.selfName, ownerName: nv.ownerName }, '建好了，已切换')
+                if (d) setNv({ name: '', selfName: '', ownerName: '' })
+              },
+            }, '新建并切换')),
+          msg ? h('span', { className: 'mt-msg ' + msg.kind }, msg.text) : null),
+        h(Card, { title: '存档', desc: 'before-save / before-switch 只留最新一份；每天自动一份，按 1/2/3/5/7/10/15/30/60/90/180 天轮换保留。' },
+          h('div', { className: 'mt-inline' },
+            h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'snapshot', onClick: () => act({ action: 'snapshot', id: data.currentId }, '已拍一份手动快照') }, '手动存档')),
+          (cur?.snapshots || []).length
+            ? h('div', { className: 'mt-list' },
+              cur.snapshots.map((s) => h('div', { key: s.slot, className: 'mt-list-row' },
+                h('div', { className: 'mt-list-main' },
+                  h('span', { className: 'mt-muted' }, s.slot),
+                  s.reason ? h('span', { className: 'mt-muted' }, `（${s.reason}）`) : null),
+                h('div', { className: 'mt-list-side' },
+                  h('span', { className: 'mt-muted' }, fmtTime(s.at)),
+                  h('button', { type: 'button', className: 'mt-btn', disabled: busy === 'restore', onClick: () => act({ action: 'restore', id: data.currentId, slot: s.slot }, `已恢复到 ${s.slot}`) }, '恢复')))))
+            : h('small', { className: 'mt-muted' }, '还没有快照：保存或切换角色时会自动留。')),
+        h(Card, { title: '当前角色', desc: '' },
+          h('div', { className: 'mt-list' },
+            h('div', { className: 'mt-list-row' }, h('span', null, '名字'), h('span', { className: 'mt-muted' }, cur?.meta?.name || '—')),
+            h('div', { className: 'mt-list-row' }, h('span', null, '自称'), h('span', { className: 'mt-muted' }, cur?.meta?.selfName || '—')),
+            h('div', { className: 'mt-list-row' }, h('span', null, '主人'), h('span', { className: 'mt-muted' }, cur?.meta?.ownerName || '—')),
+            h('div', { className: 'mt-list-row' }, h('span', null, '创建'), h('span', { className: 'mt-muted' }, fmtTime(cur?.meta?.createdAt))),
+            h('div', { className: 'mt-list-row' }, h('span', null, '最后改动'), h('span', { className: 'mt-muted' }, fmtTime(cur?.meta?.updatedAt)))))
+      )
+    }
+
+    /** 记忆页：小本本 + 发帖账本 —— 它「记得」的东西全在这 */
+    function MemoryPane() {
+      const [data, setData] = useState(null)
+      const [err, setErr] = useState('')
+      const load = useCallback(async () => {
+        try { setData(await jget('/memory')); setErr('') } catch (e) { setErr(e.message) }
+      }, [])
+      useEffect(() => { load() }, [load])
+      if (err) return h(Card, { title: '记忆', desc: '' }, h('div', { className: 'mt-alert' }, err))
+      if (!data) return h(Card, { title: '记忆', desc: '正在读小本本…' }, null)
+      const dg = data.digest || {}
+      return h('div', null,
+        h(Card, {
+          title: '它记得的事',
+          desc: `最近 ${dg.days || 7} 天：${dg.total || 0} 条互动，${dg.people || 0} 个人，回了 ${dg.replies || 0}，没回 ${dg.skips || 0}。这些会作为「我记得的事」进发帖提示词。`,
+        }, null),
+        h(Card, { title: '我最近发过的嘟文', desc: '发帖前会读这份账本防撞车：同一件事绝不再写第二遍。' },
+          (data.posted || []).length
+            ? h('div', { className: 'mt-list' },
+              data.posted.map((p, i) => h('div', { key: i, className: 'mt-list-row' },
+                h('div', { className: 'mt-list-main' },
+                  h('span', { className: 'mt-muted' }, fmtTime(p.at)),
+                  h('span', { className: 'mt-ellipsis' }, p.text)),
+                h('div', { className: 'mt-list-side' }, h('span', { className: 'mt-muted' }, p.source || '')))))
+            : h('small', { className: 'mt-muted' }, '还没发过。')),
+        h('small', { className: 'mt-muted' }, '下面的「小本本」是明细：认识的人、答应过的事、最近互动都在那儿改。')
+
+      )
+    }
+
+    /** 单个页签崩溃时不再整页白屏，而是把错误显示出来 */
+    class PaneBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { err: null } }
+      static getDerivedStateFromError(err) { return { err } }
+      render() {
+        if (this.state.err) {
+          return h(Card, { title: '这个页签出错了', desc: '把下面这段发给开发者' },
+            h('div', { className: 'mt-alert' }, String(this.state.err && (this.state.err.stack || this.state.err.message) || this.state.err)))
+        }
+        return this.props.children
+      }
     }
 
     function Panel() { // dsh-skip-func-length
@@ -527,12 +717,15 @@ window.__ModuleLoader__.load({
             h('small', { className: 'mt-muted' }, `心跳检查 ${fmtTime(st?.lastCheckAt)}`)),
           showLog ? h('pre', { className: 'mt-pre' }, (st?.log || []).slice(-40).join('\n') || '（还没有日志）') : null))
 
-      const panes = { conn: connPane, reply: replyPane, post: postPane, book: BookPane, adv: advPane }
+      // 本地闭包渲染器（用 Panel 的 state）与真正的 React 组件必须分开：
+      // 组件里带 hooks，直接当函数调用会把 hook 混进 Panel 的调用栈，切页签就报 hook 数量不一致 → 整页白屏
+      const localPanes = { conn: connPane, reply: replyPane, post: postPane, adv: advPane }
+      const compPanes = { persona: PersonaPane, character: CharacterPane }
 
       return h('div', { className: 'mt-root' },
         h('header', { className: 'mt-head' },
           h('div', null,
-            h('h2', null, '大肥鱼长毛象 bot'),
+            h('h2', null, '大肥鱼长毛象 bot', h('span', { className: 'mt-muted', style: { fontSize: '11px', marginLeft: '8px' } }, UI_VER)),
             h('p', { className: 'mt-sub' },
               account
                 ? `@${account.acct} @ ${st.creds?.instance || ''}`
@@ -555,9 +748,12 @@ window.__ModuleLoader__.load({
             onClick: () => setTab(k),
           }, label))),
 
-        tab === 'book'
-          ? h(BookPane, { cfg, set })
-          : h(React.Fragment, null, (panes[tab] || panes.conn)()),
+        h(PaneBoundary, { key: tab },
+          tab === 'memory'
+            ? h(React.Fragment, null, h(MemoryPane), h(BookPane, { cfg, set }))
+            : compPanes[tab]
+              ? h(compPanes[tab])
+              : (localPanes[tab] || localPanes.conn)()),
 
         h(SaveBar, { onSave: save, busy, msg }),
 
@@ -604,6 +800,9 @@ window.__ModuleLoader__.load({
 .mt-switch.is-on{background:rgba(46,160,67,.55);border-color:rgba(46,160,67,.6)}
 .mt-switch.is-on .mt-knob{left:20px;opacity:1}
 .mt-inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mt-field{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.mt-label{font-size:13px;font-weight:600}
+.mt-area{width:100%;min-height:88px;resize:vertical;font:inherit;font-size:13px;line-height:1.5;padding:8px 10px;box-sizing:border-box}
 .mt-muted{font-size:12px;opacity:.6;margin:0}
 .mt-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px}
 .mt-list{display:flex;flex-direction:column;gap:6px}
